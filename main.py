@@ -158,7 +158,7 @@ def evaluate(lm, args, logger):
                 elif module_name.endswith('up_proj'):
                     parent_name = module_name[:module_name.rindex('.')]
 
-                    module = model.get_submodule(module_name + '.up_proj')
+                    module = model.get_submodule(parent_name + '.up_proj')
                     module.set_quant_state(weight_quant=True, act_quant=False)
 
                     module = model.get_submodule(parent_name + '.gate_proj')
@@ -171,11 +171,11 @@ def evaluate(lm, args, logger):
                 elif module_name.endswith('q_proj'):
                     parent_name = module_name[:module_name.rindex('.')]
 
-                    module = model.get_submodule(module_name + '.q_proj')
+                    module = model.get_submodule(parent_name + '.q_proj')
                     module.set_quant_state(weight_quant=True, act_quant=False)
-                    module = model.get_submodule(module_name + '.k_proj')
+                    module = model.get_submodule(parent_name + '.k_proj')
                     module.set_quant_state(weight_quant=True, act_quant=False)
-                    module = model.get_submodule(module_name + '.v_proj')
+                    module = model.get_submodule(parent_name + '.v_proj')
                     module.set_quant_state(weight_quant=True, act_quant=False)
 
         outputs = evaluate(model,
