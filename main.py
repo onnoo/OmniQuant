@@ -22,6 +22,8 @@ from quantize.int_linear import QuantLinear
 
 import pdb
 
+from transformers.cache_utils import DynamicCache
+
 
 torch.backends.cudnn.benchmark = True
 
@@ -106,6 +108,16 @@ def evaluate(lm, args, logger):
 
         tokenizer = lm.tokenizer
         model = lm.model
+
+        def change_cache(m, x, y):
+            cache = DynamicCache()
+        
+            if len(y) == 2:
+                return (y[0], cache)
+            elif len(y) == 3:
+                return (y[0], y[1], cache)
+        
+        model.model.layers[-1].register_forward_hook(change_cache)
 
         prefix_ids = get_prefix_ids(tokenizer)
         outputs = evaluate(model,
