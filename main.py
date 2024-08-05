@@ -137,11 +137,46 @@ def evaluate(lm, args, logger):
         prefix_ids = get_prefix_ids(tokenizer)
 
         if args.use_cache:
-            misc_dir = Path('./outputs/misc/', args.pretrained.replace('/', '--'))
+            misc_dir = Path('./misc/', args.pretrained.replace('/', '--'))
             prefix_path = misc_dir.joinpath('past_key_values.pt')
             past_key_values = load_past_key_values(model, prefix_path)
         else:
             past_key_values = None
+        
+        if args.except_layer:
+            misc_dir = Path('./misc/', args.pretrained.replace('/', '--'))
+            except_layers_path = misc_dir.joinpath('except_layers.pt')
+            except_layers = json.load(except_layers_path.open())
+
+            for name, _ in except_layers:
+                module_name = 'model.' + name
+
+                if module_name.endswith('down_proj'):
+                    module = model.get_submodule(module_name)  # MLP
+                    module.set_quant_state(weight_quant=True, act_quant=False)
+
+                elif module_name.endswith('up_proj'):
+                    parent_name = module_name[:module_name.rindex('.')]
+
+                    module = model.get_submodule(module_name + '.up_proj')
+                    module.set_quant_state(weight_quant=True, act_quant=False)
+
+                    module = model.get_submodule(parent_name + '.gate_proj')
+                    module.set_quant_state(weight_quant=True, act_quant=False)
+
+                elif module_name.endswith('o_proj'):
+                    module = model.get_submodule(module_name)
+                    module.set_quant_state(weight_quant=True, act_quant=False)
+
+                elif module_name.endswith('q_proj'):
+                    parent_name = module_name[:module_name.rindex('.')]
+
+                    module = model.get_submodule(module_name + '.q_proj')
+                    module.set_quant_state(weight_quant=True, act_quant=False)
+                    module = model.get_submodule(module_name + '.k_proj')
+                    module.set_quant_state(weight_quant=True, act_quant=False)
+                    module = model.get_submodule(module_name + '.v_proj')
+                    module.set_quant_state(weight_quant=True, act_quant=False)
 
         outputs = evaluate(model,
                            tokenizer,
@@ -305,6 +340,7 @@ def main():
     parser.add_argument("--act-shifts", type=str, default=None)
 
     parser.add_argument('--use_cache', action='store_true')
+    parser.add_argument('--except_layer', action='store_true')
     parser.add_argument('--pretrained', type=str)
 
     args = parser.parse_args()
