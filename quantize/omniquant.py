@@ -46,6 +46,7 @@ def omniquant(
     act_scales,
     act_shifts,
     logger=None,
+    except_layer=[],
 ):
     logger.info("Starting ...")
     
@@ -134,7 +135,7 @@ def omniquant(
             if cache["i"] >= args.nsamples:
                 break
             try:
-                model(batch[0].to(dev))
+                    model(batch[0].to(dev))
             except ValueError:
                 pass
     
@@ -215,6 +216,13 @@ def omniquant(
                             fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
         # init smooth parameters
         set_quant_state(qlayer, weight_quant=False, act_quant=True)  # weight will be manually quantized before forward
+
+        for name, module in qlayer.named_modules():
+            full_name = f'model.layers.{i}.' + name
+            if full_name in except_layer:
+                logger.info(f"Deactivate layer: {full_name}")
+                set_quant_state(module, weight_quant=False, act_quant=False)
+
         qlayer.let = args.let
         use_shift = True 
         if is_llama or args.abits == 16:
@@ -274,7 +282,7 @@ def omniquant(
                 logger.info(f"layer {i} iter {epochs} loss:{loss_mean} norm:{norm_mean} max memory_allocated {torch.cuda.max_memory_allocated(lm._device) / 1024**2} ")
             clear_temp_variable(qlayer)
             del optimizer
-        qlayer.half() 
+        # qlayer.half() 
         # real smooth and quantization
         smooth_and_quant_inplace(qlayer, args, is_llama)
         if args.epochs>0:
@@ -291,6 +299,7 @@ def omniquant(
         else:
             register_scales_and_zeros(qlayer)
             layers[i] = qlayer.to("cpu")
+        qlayer.half() 
         if args.real_quant:
             assert args.wbits in [2,3,4] and args.abits >= 16   # only support weight-only quantization
             named_linears = get_named_linears(qlayer)

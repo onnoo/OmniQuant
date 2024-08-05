@@ -144,39 +144,8 @@ def evaluate(lm, args, logger):
             past_key_values = None
         
         if args.except_layer:
-            misc_dir = Path('./misc/', args.pretrained.replace('/', '--'))
-            except_layers_path = misc_dir.joinpath('except_layers.pt')
-            except_layers = json.load(except_layers_path.open())
-
-            for name, _ in except_layers:
-                module_name = 'model.' + name
-
-                if module_name.endswith('down_proj'):
-                    module = model.get_submodule(module_name)  # MLP
-                    module.set_quant_state(weight_quant=True, act_quant=False)
-
-                elif module_name.endswith('up_proj'):
-                    parent_name = module_name[:module_name.rindex('.')]
-
-                    module = model.get_submodule(parent_name + '.up_proj')
-                    module.set_quant_state(weight_quant=True, act_quant=False)
-
-                    module = model.get_submodule(parent_name + '.gate_proj')
-                    module.set_quant_state(weight_quant=True, act_quant=False)
-
-                elif module_name.endswith('o_proj'):
-                    module = model.get_submodule(module_name)
-                    module.set_quant_state(weight_quant=True, act_quant=False)
-
-                elif module_name.endswith('q_proj'):
-                    parent_name = module_name[:module_name.rindex('.')]
-
-                    module = model.get_submodule(parent_name + '.q_proj')
-                    module.set_quant_state(weight_quant=True, act_quant=False)
-                    module = model.get_submodule(parent_name + '.k_proj')
-                    module.set_quant_state(weight_quant=True, act_quant=False)
-                    module = model.get_submodule(parent_name + '.v_proj')
-                    module.set_quant_state(weight_quant=True, act_quant=False)
+            # omniquant에서 처리
+            pass
 
         outputs = evaluate(model,
                            tokenizer,
@@ -378,6 +347,15 @@ def main():
     for param in lm.model.parameters():
         param.requires_grad = False
 
+    if args.except_layer:
+        import json
+
+        misc_dir = Path('./misc/', args.pretrained.replace('/', '--'))
+        except_layers_path = misc_dir.joinpath('except_layers.pt')
+        except_layer = json.load(except_layers_path.open())
+        except_layer = [ 'model.' + name for name, _ in except_layer]
+    else:
+        except_layer = []
     
 
     args.weight_quant_params = {
@@ -459,6 +437,7 @@ def main():
             act_scales,
             act_shifts,
             logger,
+            except_layer=except_layer
         )
         logger.info(time.time() - tick)
     if args.save_dir:
