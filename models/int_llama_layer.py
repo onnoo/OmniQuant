@@ -14,6 +14,8 @@ import pdb
 import copy
 from models.transformation import *
 
+from transformers.cache_utils import Cache
+
 
 
 
@@ -120,7 +122,10 @@ class QuantLlamaAttention(nn.Module):
 
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
-            kv_seq_len += past_key_value[0].shape[-2]
+            if isinstance(past_key_value, Cache):
+                kv_seq_len += past_key_value.get_seq_length()
+            elif isinstance(past_key_value, tuple):
+                kv_seq_len += past_key_value[0].shape[-2]
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
 
@@ -128,9 +133,10 @@ class QuantLlamaAttention(nn.Module):
         # [bsz, nh, t, hd]
 
         if past_key_value is not None:
-            # reuse k, v, self_attention
-            key_states = torch.cat([past_key_value[0], key_states], dim=2)
-            value_states = torch.cat([past_key_value[1], value_states], dim=2)
+            if past_key_value.get_seq_length() > 0:
+                # reuse k, v, self_attention
+                key_states = torch.cat([past_key_value[self.layer_idx][0], key_states], dim=2)
+                value_states = torch.cat([past_key_value[self.layer_idx][1], value_states], dim=2)
 
         past_key_value = (key_states, value_states) if use_cache else None
 

@@ -6,7 +6,7 @@ from models.LMClass import LMClass
 import torch
 import time
 from datautils import get_loaders
-from lm_eval import evaluator
+# from lm_eval import evaluator
 from pprint import pprint
 from parallel_utils import map_layers_to_multi_gpus, get_lowest_occupied_gpu
 import torch.nn as nn
@@ -90,10 +90,46 @@ def evaluate(lm, args, logger):
         elif "falcon" in args.net.lower():
             lm.model.transformer = lm.model.transformer.to(lm.device)
 
+    if args.eval_ppl:
+        import json
+        from datetime import datetime
+        from eval_utils import evaluate
+
+        def get_prefix_ids(tokenizer):
+            bos_token_id = tokenizer.bos_token_id
+            eos_token_id = tokenizer.eos_token_id
+            
+            if bos_token_id:
+                return [bos_token_id]
+            else:
+                return [eos_token_id]
+
+        tokenizer = lm.tokenizer
+        model = lm.model
+
+        prefix_ids = get_prefix_ids(tokenizer)
+        outputs = evaluate(model,
+                           tokenizer,
+                           tasks=['wikitext'],
+                           max_length=2000,
+                           prefix_ids=prefix_ids,
+                           past_key_values=None)
+        
+        results = outputs['results']
+        results['args'] = args.__dict__
+
+        fname = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.json')
+        save_path = Path('./outputs', fname)
+        if not save_path.parent.exists():
+            save_path.parent.mkdir(parents=True)
+        with open(save_path, 'w') as f:
+            json.dump(outputs, f, indent=2)
+
+        return outputs
 
     if args.eval_ppl:
         # for dataset in ["wikitext2", "ptb", "c4","ptb-new",'c4-new']:
-        for dataset in ["wikitext2", "c4"]:
+        for dataset in ["wikitext2", "c4"][:1]:
             cache_testloader = f'{args.cache_dir}/testloader_{args.model_family}_{dataset}_all.cache'
             if os.path.exists(cache_testloader):
                 testloader = torch.load(cache_testloader)
