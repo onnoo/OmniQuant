@@ -106,10 +106,25 @@ def evaluate(lm, args, logger):
             else:
                 return [eos_token_id]
 
+        def load_past_key_values(path):
+            kv_cache = torch.load(path)
+
+            cuda_kv_cache = []
+
+            for i in range(len(kv_cache)):
+                device = 'cuda'
+                key, value = kv_cache[i]
+                cuda_kv_cache.append((key.to(device), value.to(device)))
+            
+            return tuple(cuda_kv_cache)
+
         tokenizer = lm.tokenizer
         model = lm.model
 
         def change_cache(m, x, y):
+            """
+            compatible with transformers==4.37.2
+            """
             cache = DynamicCache()
         
             if len(y) == 2:
@@ -120,12 +135,20 @@ def evaluate(lm, args, logger):
         model.model.layers[-1].register_forward_hook(change_cache)
 
         prefix_ids = get_prefix_ids(tokenizer)
+
+        if args.use_cache:
+            misc_dir = Path('./outputs/misc/', args.pretrained.replace('/', '--'))
+            prefix_path = misc_dir.joinpath('past_key_values.pt')
+            past_key_values = load_past_key_values(model, prefix_path)
+        else:
+            past_key_values = None
+
         outputs = evaluate(model,
                            tokenizer,
                            tasks=['wikitext'],
                            max_length=2000,
                            prefix_ids=prefix_ids,
-                           past_key_values=None)
+                           past_key_values=past_key_values)
         
         results = outputs['results']
         results['args'] = args.__dict__
@@ -280,6 +303,9 @@ def main():
     parser.add_argument("--net", type=str, default=None, choices=net_choices)
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
+
+    parser.add_argument('--use_cache', action='store_true')
+    parser.add_argument('--pretrained', type=str)
 
     args = parser.parse_args()
     random.seed(args.seed)
