@@ -51,6 +51,19 @@ net_choices = [
 ]
 
 
+def load_past_key_values(path):
+    kv_cache = torch.load(path)
+
+    cuda_kv_cache = []
+
+    for i in range(len(kv_cache)):
+        device = 'cuda'
+        key, value = kv_cache[i]
+        cuda_kv_cache.append((key.to(device), value.to(device)))
+    
+    return tuple(cuda_kv_cache)
+
+
 @torch.no_grad()
 def evaluate(lm, args, logger):
     results = {}
@@ -106,18 +119,6 @@ def evaluate(lm, args, logger):
             else:
                 return [eos_token_id]
 
-        def load_past_key_values(path):
-            kv_cache = torch.load(path)
-
-            cuda_kv_cache = []
-
-            for i in range(len(kv_cache)):
-                device = 'cuda'
-                key, value = kv_cache[i]
-                cuda_kv_cache.append((key.to(device), value.to(device)))
-            
-            return tuple(cuda_kv_cache)
-
         tokenizer = lm.tokenizer
         model = lm.model
 
@@ -139,7 +140,7 @@ def evaluate(lm, args, logger):
         if args.use_cache:
             misc_dir = Path('./misc/', args.pretrained.replace('/', '--'))
             prefix_path = misc_dir.joinpath('past_key_values.pt')
-            past_key_values = load_past_key_values(model, prefix_path)
+            past_key_values = load_past_key_values(prefix_path)
         else:
             past_key_values = None
         
@@ -357,6 +358,14 @@ def main():
     else:
         except_layer = []
     
+    if args.use_cache:
+        misc_dir = Path('./misc/', args.pretrained.replace('/', '--'))
+        prefix_path = misc_dir.joinpath('past_key_values.pt')
+        past_key_values = load_past_key_values(prefix_path)
+        past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+    else:
+        past_key_values = None
+    
 
     args.weight_quant_params = {
         "n_bits": args.wbits,
@@ -412,7 +421,7 @@ def main():
         logger.info("=== start quantization ===")
         tick = time.time()     
         # load calibration dataset
-        cache_dataloader = f'{args.cache_dir}/dataloader_{args.model_family}_{args.calib_dataset}_{args.nsamples}.cache'
+        cache_dataloader = f'{args.cache_dir}/dataloader_{args.model_family}_{args.calib_dataset}_{args.nsamples}_cached={args.use_cache}.cache'
         if os.path.exists(cache_dataloader):
             dataloader = torch.load(cache_dataloader)
             logger.info(f"load calibration from {cache_dataloader}")
@@ -422,7 +431,7 @@ def main():
                 nsamples=args.nsamples,
                 seed=args.seed,
                 model=args.model,
-                seqlen=lm.seqlen,
+                seqlen=lm.seqlen if past_key_values is None else 2000,
             )
             torch.save(dataloader, cache_dataloader)    
         act_scales = None
@@ -436,8 +445,10 @@ def main():
             dataloader,
             act_scales,
             act_shifts,
-            logger,
-            except_layer=except_layer
+            seqlen=lm.seqlen if past_key_values is None else 2000,
+            logger=logger,
+            except_layer=except_layer,
+            past_key_values=past_key_values
         )
         logger.info(time.time() - tick)
     if args.save_dir:

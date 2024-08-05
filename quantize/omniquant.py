@@ -20,6 +20,7 @@ try:
 except:
     print("auto_gptq is required for real quantization")
 
+from transformers.cache_utils import DynamicCache
 
 
 def get_named_linears(module):
@@ -45,8 +46,10 @@ def omniquant(
     dataloader,
     act_scales,
     act_shifts,
+    seqlen,
     logger=None,
     except_layer=[],
+    past_key_values: DynamicCache = None,
 ):
     logger.info("Starting ...")
     
@@ -54,7 +57,7 @@ def omniquant(
     model = lm.model
     dev = lm.device
     use_cache = model.config.use_cache
-    model.config.use_cache = False
+    model.config.use_cache = past_key_values is not None
     is_llama = False
     if "llama" in args.net.lower():
         is_llama = True
@@ -108,7 +111,7 @@ def omniquant(
         dtype = torch.float16
         traincast = torch.cuda.amp.autocast
     inps = torch.zeros(
-        (args.nsamples, lm.seqlen, model.config.hidden_size), dtype=dtype, device=dev
+        (args.nsamples, seqlen, model.config.hidden_size), dtype=dtype, device=dev
     )
     cache = {"i": 0}
 
@@ -135,7 +138,7 @@ def omniquant(
             if cache["i"] >= args.nsamples:
                 break
             try:
-                    model(batch[0].to(dev))
+                    model(batch[0].to(dev), past_key_values=past_key_values)
             except ValueError:
                 pass
     
@@ -181,7 +184,7 @@ def omniquant(
     else:
         position_ids = None
 
-
+    logger.info(f"Position Ids: {position_ids}")
 
     if args.resume:
         omni_parameters = torch.load(args.resume)
@@ -204,6 +207,7 @@ def omniquant(
             qlayer = DecoderLayer(lm.model.config, layer, args)
         qlayer = qlayer.to(dev)
 
+        qlayer.self_attn.layer_idx = i
         
         # obtain output of full-precision model
         set_quant_state(qlayer, weight_quant=False, act_quant=False)
@@ -211,9 +215,9 @@ def omniquant(
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
                     for j in range(args.nsamples):
-                        fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids, past_key_value=past_key_values)[0]
                         if args.aug_loss:
-                            fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                            fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids, past_key_value=past_key_values)[0]
         # init smooth parameters
         set_quant_state(qlayer, weight_quant=False, act_quant=True)  # weight will be manually quantized before forward
 
@@ -264,7 +268,7 @@ def omniquant(
                     # obtain output of quantization model
                     with traincast():
                         smooth_and_quant_temporary(qlayer, args, is_llama)
-                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
+                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids, past_key_value=past_key_values)[0]
                         loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
@@ -291,7 +295,7 @@ def omniquant(
                 # with torch.cuda.amp.autocast():
                 with traincast():
                     for j in range(args.nsamples):
-                        quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids, past_key_value=past_key_values)[0]
             register_scales_and_zeros(qlayer)
             layers[i] = qlayer.to("cpu")
             omni_parameters[i] = omni_state_dict(qlayer)
