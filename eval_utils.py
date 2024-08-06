@@ -184,4 +184,4 @@ def get_c4_testset(seqlen, tokenizer):
         valenc.append(tmp.input_ids[:, i:j])
     valenc = torch.hstack(valenc)
 
-    return None, valenc
+    return valenc
