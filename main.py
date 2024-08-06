@@ -108,7 +108,7 @@ def evaluate(lm, args, logger):
     if args.eval_ppl:
         import json
         from datetime import datetime
-        from eval_utils import evaluate
+        from eval_utils import evaluate, evaluate_c4
 
         def get_prefix_ids(tokenizer):
             bos_token_id = tokenizer.bos_token_id
@@ -147,13 +147,20 @@ def evaluate(lm, args, logger):
         if args.except_layer:
             # omniquant에서 처리
             pass
-
-        outputs = evaluate(model,
-                           tokenizer,
-                           tasks=['wikitext'],
-                           max_length=2000,
-                           prefix_ids=prefix_ids,
-                           past_key_values=past_key_values)
+        
+        if args.eval_c4:
+            outputs = evaluate_c4(model,
+                                  tokenizer,
+                                  seqlen=2000,
+                                  prefix_ids=prefix_ids,
+                                  past_key_values=past_key_values)
+        else:
+            outputs = evaluate(model,
+                               tokenizer,
+                               tasks=['wikitext'],
+                               max_length=2000,
+                               prefix_ids=prefix_ids,
+                               past_key_values=past_key_values)
         
         results = outputs['results']
         results['args'] = args.__dict__
@@ -312,6 +319,7 @@ def main():
     parser.add_argument('--use_cache', action='store_true')
     parser.add_argument('--except_layer', action='store_true')
     parser.add_argument('--pretrained', type=str)
+    parser.add_argument('--eval_c4', action='store_true')
 
     args = parser.parse_args()
     random.seed(args.seed)
