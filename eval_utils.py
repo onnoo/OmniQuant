@@ -128,18 +128,18 @@ def evaluate_c4(model,
         # logits = lm.model.lm_head(hidden_states)
         logits = lm._model_call(batch)
         shift_logits = logits[:, :-1, :]
-        shift_labels = testenc[:, (i * lm.seqlen) : ((i + 1) * lm.seqlen)][
+        shift_labels = testenc[:, (i * seqlen) : ((i + 1) * seqlen)][
             :, 1:
-        ].to(lm.model.lm_head.weight.device)
+        ].to(device)
         loss_fct = nn.CrossEntropyLoss()
         loss = loss_fct(
             shift_logits.view(-1, shift_logits.size(-1)),
             shift_labels.view(-1),
         )
-        neg_log_likelihood = loss.float() * lm.seqlen
+        neg_log_likelihood = loss.float() * seqlen
         nlls.append(neg_log_likelihood)
     
-    ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * lm.seqlen))
+    ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * seqlen))
     print(f'C4 PPL : {ppl.item()}')
 
     return { 'results': { 'c4.ppl': ppl.item() } }
