@@ -105,6 +105,67 @@ def evaluate(lm, args, logger):
         elif "falcon" in args.net.lower():
             lm.model.transformer = lm.model.transformer.to(lm.device)
 
+    if args.eval_zeroshot:
+        import json
+        from datetime import datetime
+        from eval_utils import evaluate, evaluate_c4
+
+        def get_prefix_ids(tokenizer):
+            bos_token_id = tokenizer.bos_token_id
+            eos_token_id = tokenizer.eos_token_id
+            
+            if bos_token_id:
+                return [bos_token_id]
+            else:
+                return [eos_token_id]
+
+        tokenizer = lm.tokenizer
+        model = lm.model
+
+        def change_cache(m, x, y):
+            """
+            compatible with transformers==4.37.2
+            """
+            cache = DynamicCache()
+        
+            if len(y) == 2:
+                return (y[0], cache)
+            elif len(y) == 3:
+                return (y[0], y[1], cache)
+        
+        model.model.layers[-1].register_forward_hook(change_cache)
+
+        prefix_ids = get_prefix_ids(tokenizer)
+
+        if args.use_cache:
+            misc_dir = Path('./misc/', args.pretrained.replace('/', '--'))
+            prefix_path = misc_dir.joinpath('past_key_values.pt')
+            past_key_values = load_past_key_values(prefix_path)
+        else:
+            past_key_values = None
+        
+        if args.except_layer:
+            # omniquant에서 처리
+            pass
+        
+        outputs = evaluate(model,
+                           tokenizer,
+                           tasks=['piqa', 'hellaswag', 'winogrande'],
+                           max_length=2000,
+                           prefix_ids=prefix_ids,
+                           past_key_values=past_key_values)
+        
+        results = outputs['results']
+        results['args'] = args.__dict__
+
+        fname = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.json')
+        save_path = Path('./outputs', fname)
+        if not save_path.parent.exists():
+            save_path.parent.mkdir(parents=True)
+        with open(save_path, 'w') as f:
+            json.dump(outputs, f, indent=2)
+        exit()
+
     if args.eval_ppl:
         import json
         from datetime import datetime
@@ -320,6 +381,9 @@ def main():
     parser.add_argument('--except_layer', action='store_true')
     parser.add_argument('--pretrained', type=str)
     parser.add_argument('--eval_c4', action='store_true')
+    parser.add_argument('--disable_kv_quant', action='store_true')
+    parser.add_argument('--eval_zeroshot', action='store_true')
+    
 
     args = parser.parse_args()
     random.seed(args.seed)
@@ -447,6 +511,7 @@ def main():
         if args.let:
             act_scales = torch.load(args.act_scales)
             act_shifts = torch.load(args.act_shifts)
+        torch.save(args, 'args.pt')
         omniquant(
             lm,
             args,
@@ -456,7 +521,8 @@ def main():
             seqlen=lm.seqlen if past_key_values is None else 2000,
             logger=logger,
             except_layer=except_layer,
-            past_key_values=past_key_values
+            past_key_values=past_key_values,
+            disable_kv_quant=args.disable_kv_quant
         )
         logger.info(time.time() - tick)
     if args.save_dir:

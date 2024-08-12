@@ -4,6 +4,7 @@ from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
 from models.int_falcon_layer import QuantFalconDecoderLayer
 from quantize.int_linear import QuantLinear
+from quantize.int_matmul import QuantMatMul
 from contextlib import nullcontext
 import copy
 import math
@@ -50,6 +51,7 @@ def omniquant(
     logger=None,
     except_layer=[],
     past_key_values: DynamicCache = None,
+    disable_kv_quant: bool = False
 ):
     logger.info("Starting ...")
     
@@ -226,6 +228,13 @@ def omniquant(
             if full_name in except_layer:
                 logger.info(f"Deactivate layer: {full_name}")
                 set_quant_state(module, weight_quant=False, act_quant=False)
+
+        if disable_kv_quant:
+            for name, module in qlayer.named_modules():
+                full_name = f'model.layers.{i}.' + name
+                if isinstance(module, QuantMatMul):
+                    logger.info(f"Deactivate KV quant: {full_name}")
+                    set_quant_state(module, weight_quant=False, act_quant=False)
 
         qlayer.let = args.let
         use_shift = True 
